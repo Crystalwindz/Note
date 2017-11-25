@@ -1,2 +1,6 @@
 # Note
-C++ Study Notes
+
+## C++ Study Notes
+
+* Effective C++
+* More Effective C++
