@@ -236,4 +236,170 @@ list<int> data(data_begin,data_end);
 
 ### 第7条：如果容器中包含了通过new操作创建的指针，切记在容器对象析构前将指针delete掉
 
+STL中的容器，会自己进行适当的内存管理，当他们被析构时，他们会自动析构所包含的每个对象，不要以为这样你就无需考虑清理问题，如果容器包含的是通过new方式而分配的指针，容器的确会析构掉它包含的每个指针，但并不会调用delete，这会导致内存泄漏。
 
+你可以选择在容器还没析构时，自己手动调用delete来解决这个问题，但这并不是异常安全的。假如你在删除指针过程中抛出了异常，剩下的指针就不会被delete，同样会发生资源泄漏，怎么办呢？最简单的方法就是使用智能指针，不过，千万不要使用auto_ptr！（参见第8条），此外，你也可以选择使用RAII（智能指针实际上就是RAII的一个例子）。
+
+### 第8条：切勿创建包含auto_ptr的容器对象
+
+首先明确一点，auto_ptr的容器是被禁止的，按照标准，试图违反这一条规定的代码不会通过编译。那么，为什么呢？
+
+回顾一下之前所说的，容器会做很多拷贝操作，拷贝auto_ptr意味着什么？当你拷贝一个auto_ptr时，它所指的对象的所有权会被移交给复制的auto_ptr上，而它自身被置为NULL：拷贝一个auto_ptr意味着改变它的值！
+
+这一现象会导致程序出现各种各样奇怪的问题，比如说：
+
+~~~c++
+vector<auto_ptr<int> > v;   //这不应该通过编译
+...
+sort(v.begin(), v.end(),    //对vector排序
+[](const auto_ptr<int>& l, const auto_ptr<int>& r){ return *l > *r ;});//lambda
+~~~
+
+这段代码看起来没什么问题，但实际上呢？在排序的过程中，v中的一个或者多个auto_ptr可能会被置为NULL，对v的排序竟然改变了v的内容！
+
+如果你想使用包含智能指针的容器，别害怕，这是没有问题的，有问题的是auto_ptr不是应该放在容器中使用的智能指针。
+
+### 第9条：慎重选择删除元素的方法
+
+假定你有一个下面的容器：
+
+~~~c++
+Container<int> c;
+~~~
+
+如果你想删除c中所有值为2017的元素，完成这一任务的方式是随着容器类型而异的：
+
+* 如果容器是连续内存容器（vector、deque、string），最好的办法是采用erase-remove习惯用法（见第32条）：
+    ~~~c++
+    c.erase(remove(c.begin(), c.end(), 2017), c.end());
+    ~~~
+
+* 如果是list，erase-remove方法同样有效，不过推荐使用成员函数remove：
+    ~~~c++
+    c.remove(2017);
+    ~~~
+
+* 如果容器是标准关联容器（set、multimap，map，multimap），对这些容器使用remove算法，可能会覆盖容器的值并破坏容器（见第22条），而这类容器根本没有remove成员函数，所以请调用erase成员函数：
+    ~~~c++
+    c.erase(2017);
+    ~~~
+
+现在改变一下需求，我们要删除c中满足下面判别式的每一个对象：
+
+~~~c++
+bool q(int );
+~~~
+
+* 对于序列容器（vector，string，deque，list），把remove调用换成remove_if就可以了：
+    ~~~c++
+    c.erase(remove_if(c.begin(), c.end(), q),//当c是vector、string、
+            c.end());                        //deque时，这是最佳办法
+
+    c.remove_if(q);                          //当c是list的最佳办法
+    ~~~
+
+* 对于关联容器，有两种办法，一种利于编码，另一种效率更高：
+    * 易于编码的方法，利用remove_copy_if把我们需要的值复制到另一个新容器中，再把原来容器中的内容与新容器中的内容交换：
+    ~~~c++
+    AssocContainer<int> c;      //c是一个关联容器
+    ...
+    AssocContainer<int> good_c; //存放需要的值
+    remove_copy_if(c.begin(), c.end(),
+                    inserter(good_c, good_c.end()),
+                   q);
+    c.swap(good_c);
+    ~~~
+    * 效率更高的方法，写一个循环遍历并删除要删除的元素：
+    ~~~c++
+    AssocContainer<int> c;
+    ...
+    for(AssocContainer<int>::iterator i = c.begin();
+        i != c.end(); ++i)
+        //注意，下面这里必须要写i++，因为当关联容器中的一个元素
+        //被删除时，指向该元素的所有迭代器都会失效，必须先递增
+        //迭代器，再返回指向该删除的那个元素的迭代器
+        if(q(*i))   c.erase(i++);
+        else        ++i;
+    ~~~
+
+现在再改一下需求，我们在上面的基础上，希望每次元素删除时，都能向一个日志文件中写一条信息：
+
+* 对于关联容器，这十分简单，只需要对循环简单修改：
+    ~~~c++
+    ofstream logfile;
+    AssocContainer<int> c;
+    ...
+    for(AssocContainer<int>::iterator i = c.begin();
+        i != c.end(); ++i){
+        if(q(*i)){
+            logfile << "Erase" << *i << '\n'; //写日志文件
+            c.erase(i++);                     //删除元素
+        }
+        else        ++i;
+    }
+    ~~~
+
+*  对于vector、string、deque，我们无法使用erase-remove方法了，这个方法无法写日志文件。而且我们不能用和关联容器一样的方法，因为调用erase后，指向被删除元素自身以及它之后所有元素的迭代器都会失效！我们要利用erase函数的返回值，它会返回紧跟被删除元素的下一个元素的有效迭代器：
+    ~~~c++
+    for(SeqContainer<int>::iterator i = c.begin();
+        i != c.end(); ++i)
+        if(q(*i)){
+            logfile << "Erase" << *i << '\n';
+            i = c.erase(i);       //把erase返回值赋给i，使i的值有效
+        }
+        else        ++i;
+    ~~~
+
+* 对于list，就遍历和删除来说，你可以把它当作vector/string/deque对待，也可以把它当作关联容器对待，两种方式对list都适用，通常是把list看作vector/string/deque对待。
+
+总结一下：
+
+* 要删除容器中有特定值的所有对象：
+    * 如果容器是vecotr/string/deque，则使用erase-remove方法。
+    * 如果容器是list，使用list::remove。
+    * 如果容器是标准关联容器，使用它的而erase成员函数。
+* 要删除容器中满足特定判别式的所有对象：
+    * 如果容器是vecotr/string/deque，则使用erase-remove_if方法。
+    * 如果容器是list，使用list::remove_if。
+    * 如果容器是标准关联容器，使用remove_copy_if和swap，或者写一个循环遍历容器中的元素，注意把迭代器传给erase时，对它进行后缀递增。
+* 要在循环内部做某些（除了删除对象之外）操作：
+    * 如果容器是标准序列容器，写一个循环遍历元素，注意每次调用erase时，用它的返回值更新迭代器。
+    * 如果容器是标准关联容器，写一个循环遍历元素，注意把迭代器传给erase时，对它进行后缀递增。
+
+### 第10条：了解分配子（allocator）的约定和限制
+
+分配子很奇怪，它的最初设计意图是提供一个内存模型的抽象，像new操作符和new[]操作符一样，STL内存非配置负责分配（释放）原始内存，但它提供的接口和new操作符，new[]操作符甚至malloc一点也不相似，而且，很多标准容器从来不向与之关联的分配子申请内存，从来没有，这使分配子变得很怪异。
+
+C++标准中，一个类型为T的对象，它的默认分配子（allocator\<T\>）提供了两个类型定义，allocator\<T\>::pointer, allocator\<T\>::reference，用户定义的分配子也应该提供这些类型定义。
+
+这里有些问题，对吗？C++中，引用是不可能仿冒的，因为这需要重载operator.（点操作符），可这个操作符是不允许重载的，并且，创建这种具有引用特点的对象是使用代理对象的一个例子，而使用代理对象会有很多问题（详见More Effective C++ 第30条）。
+
+C++标准明确指出，允许库实现者假定每个分配子的指针类型等同于T*，而引用类型等同于T&，也就是说，库实现者可以忽略类型定义，直接使用指针和引用。
+
+这很怪异，对吧？再来一个，分配子是对象，意味着它可以有成员函数，嵌套类型和类型定义，而C++标准说，STL的实现可以假定所有属于同一类型的分配子对象都是等价的，并且相互比较的结果总是相等的，很糟糕？这还是有理由的：
+
+~~~C++
+template<typename T>
+class SpecialAllocator{...};
+typedef SpecialAllocator<Widget> SAW;
+list<Widget,SAW> list1;
+list<Widget,SWA> list2;
+...
+list1.splice(list1.begin(),list2);//把list2的节点移动到list1的前面
+~~~
+
+想一下，当list中的元素被链接到另一个时，没有复制任何东西，只有一些指针值被调整，那么，当list1被析构时，它必须释放自己所有的节点（包括从list2链接过来的节点），因为假定同一类型的分配子是等价的，所以由list2分配子对象分配的内存就可以由list1分配子对象安全的释放。
+
+但是再想一想，假定同一类型的分配子是等价的其实是一个很严苛的限制，它意味着可移植的（在不同的STL实现下都可以正确工作）分配子不可以有状态，也就是任何**非静态的成员**，至少不能有影响其行为的数据成员，因为这样，两个分配子对象就有可能不再等价了。
+
+再来讨论下分配子分配原始内存这点，它的接口与new操作符是不同的，如下：
+
+~~~c++
+void* operator new(size_t butes);
+//pointer是个类型定义，它实际上总是T*
+pointer allocator<T>::allocate(size_type numObjects);
+~~~
+
+两者都带参数指定要分配多少内存，对于operator new，指明的是一定数量的字节，而对于allocate，指明的是内存中要容纳多少个T对象。
+
+它们的返回值也不同，operator new返回void\*，指向未初始化内存，而allocator\<T\>::allocate返回T\*，可是，此时T尚未构造！STL有着这样的期望：allocator\<T\>::allocate的调用者最终会在返回的内存中构造一个或者多个T对象（可能通过allocator\<T\>::construct，或者通过
