@@ -383,7 +383,7 @@ template<typename T>
 class SpecialAllocator{...};
 typedef SpecialAllocator<Widget> SAW;
 list<Widget,SAW> list1;
-list<Widget,SWA> list2;
+list<Widget,SAW> list2;
 ...
 list1.splice(list1.begin(),list2);//把list2的节点移动到list1的前面
 ~~~
