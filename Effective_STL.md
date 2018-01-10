@@ -595,3 +595,42 @@ vector<int>().swap(data);
 顺带一提，swap操作不会使迭代器、指针和引用失效，它们依然指向原来的元素，只是元素的位置已经变了。
 
 PS：C++11已为deque、string、vector提供了shrink_to_fit成员函数，功能与本节一致，不过能否将capacity()减少到size()仍然依赖实现，并可能发生重分配。
+
+### 第18条：避免使用vector\<bool\>
+
+首先明确，vector\<bool\>不是一个STL容器，其次它也不存储bool，其他一切正常。
+
+为什么说vector\<bool\>不是一个STL容器？因为下面的代码无法通过编译：
+
+~~~c++
+vector<bool> c(50);
+bool* p = &c[0];//无法通过编译
+~~~
+
+Why？因为vector\<bool\>为了节省空间，它并不真的存储bool，而 是类似位域的思想，存储在vector\<bool\>中的每一个“bool”仅占一个二进制位，一个8位的字节可容纳8个“bool”。创建指向一个bool的指针是被允许的，但创建指向单个位的指针是不允许的。
+
+指向单个位的引用也是被禁止的，那么，vector\<bool\>怎么解决operator[]应该返回T&的问题？它采用了代理对象的概念，也就是说，vector\<bool\>::operator[]实际上返回一个对象，这个对象表现得像一个指向单个位的引用，大概像下面这样：
+
+~~~c++
+//模版偏特化
+template<typename Allocator>
+vector<bool, Allocator>{
+public:
+    class reference {...};//代理对象类
+    reference operator[]*(size_type n);
+    ...
+};
+~~~
+
+那么，下面代码为何不能通过编译就好理解了：
+~~~c++
+vector<bool> c(50);
+bool* p = &c[0];//右侧类型实际上是vector<bool>::reference*
+~~~
+
+既然vector\<bool\>不是一个STL容器，它为何还出现在C++标准中呢？原因是因为一个雄心勃勃的实验：
+
+    代理对象在C++软件开发中经常会很有用，而C++标准委员会的人很清楚这一点，于是他们决定开发vector<bool>来演示STL如何支持“通过代理来存取其元素的容器”，他们认为，C++标准中有了这个例子，人们就在实现自己的基于代理的容器时就有了现成的参考。然而，他们却发现，要创建一个基于代理的容器，又要求它满足STL容器的所有要求是不可能的，由于种种原因，这个失败的尝试遗留在了标准中:(
+
+所以，最好不要使用vector\<bool\>，如果你想要一个bool的容器，你可以选择deque\<bool\>，如果你想对位进行操作，可以选择bitset。
+
