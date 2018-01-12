@@ -752,3 +752,118 @@ s.insert(10);
 
 ### 第22条：切勿直接修改set或者multiset中的键
 
+因为set和multiset中的元素是有序存放的，所以你不能直接修改键，这会破坏顺序。
+
+对于map和multimap来说，因为其元素的类型为pair\<const K, V\>，直接更改键甚至不可能通过编译。
+
+如果你放进set中的每个对象都是一组数据的集合（struct），而只有其中的一个数据充当了键，那么你可以更改对象的非键部分，不过这样做是不可移植的，标准规定了：set和map中的数据不应该在没有强制类型转换的情况下可被更改，所以有的STL实现不会允许你这样做。
+
+运用强制类型转换进行更改要像下面这样写：
+~~~C++
+class data{//定义一个数据集合，以id为键
+pubilc:
+    void setname(const string& name);
+    const string& getname();
+    void setage(const int& age);
+    const int& getage();
+    int getid();
+private:
+    string name;
+    int age;
+    int id;
+}
+set<data> s;
+...//向s中插入若干元素
+s::iterator i = s.find(special_id);
+if(i != s.end()){
+    //必须是const_cast<data&>
+    const_cast<data&>(*i).setname("Tom");
+}
+~~~
+如果你这样写，会产生临时对象，从而与预期结果不符：
+~~~c++
+static_cast<data>(*i).setname("Tom");
+~~~
+
+上面的代码与下面的等价：
+~~~c++
+(data(*i)).setname("Tom");
+~~~
+然后和下面的等价：
+~~~c++
+data temp(*i);
+temp.setname("Tom");
+~~~
+
+强制类型转换很危险，能避免就避免用它，如果你真的想安全可行地修改set、multiset、map、multimap中的元素，这样做：
+1. 找到你想修改的元素；
+2. 为要修改的元素做一份拷贝，注意不要声明为const，你是想改变它；
+3. 修改拷贝使之具有你想要的值；
+4. 删除容器中的原元素，通常采用erase()；
+5. 将拷贝添加进容器，为了节省时间，可采用提示形式的insert。
+
+像这样：
+~~~c++
+s::iterator i = s.find(special_id);
+if(i != s.end()){
+    data temp(*i);
+    temp.setname("Tom");
+    s.erase(i++);//递增迭代器保证它的有效性
+    s.insert(i, temp);
+}
+~~~
+
+### 第23条：考虑用排序的vector替代关联容器
+
+如果需要一个可供快速查找的容器，一般会想到标准关联容器，然而，如果查找速度非常重要，非标准散列容器更合适，而如果对数级别的查找速度对你来说刚刚好，有时用排序的vector代替关联容器会更好。
+
+标准关联容器通常用红黑树（二叉平衡树）实现，并且是基于节点的容器，所以这意味着它查找速度是对数级别的，插入删除元素很方便，但由于要存储指向节点的指针，占用的内存空间比较大并且元素不是连续的（当数据量很大时，这可能会很慢）。
+
+而vector中的元素是连续存储的，这使得存储相同的数据vector比标准关联容器占用内存要小，并且在对vector进行排序后，使用二分查找，它的查找速度也是对数级别。不过，向vector中插入删除元素后，插入删除位置后的所有元素都要移动，如果超出容器容量，vector还要重新分配内存。
+
+那么，当查找操作不与插入删除操作混杂在一起，并且插入和删除不是很频繁的话，考虑到占用内存以及数据量很大时标准关联容器会比较慢，此时可用排序的vector替代关联容器。
+
+另外，用vector替代map，multimap时有几点要注意：
+* vector必须存储pair\<K, V\>类型的对象，因为map中存储的是pair\<const K, V\>，去掉了const是因为排序时容器元素要进行赋值移动。
+* 编写自己的排序函数，而且这个函数只对元素的键（K）排序。
+* 编写两个查找函数（通过重载），每个查找函数都有两个参数，都为K和pair\<K, V\>，不过顺序不同。这是因为，你查找时是按照键查找的，用键和容器中的pair对象做比较查找，你不知道第一个参数是键还是pair对象。
+
+### 第24条：当效率至关重要时，请在map::operator[]和map::insert之间谨慎选择
+
+向map中添加一个元素，通常你有两种选择：
+~~~c++
+map<int, string> m;
+m[6] = "A";
+~~~
+或者：
+~~~C++
+m.insert(map<int, string>::value_type(6, "A"));
+~~~
+
+这种情况下，insert更快，map做了下面的事：
+1. 先构造一个key为6，value为默认值的对象插入map。
+2. 为这个对象的value赋值"A"。
+
+赋值时，如果value类型没有定义特定的赋值函数，应该还会构造一个临时对象然后调用operator=函数赋值，然后析构临时对象，而insert直接用6，"A"构造了对象并插入map。
+
+### 第25条：熟悉非标准的散列容器
+
+很遗憾，之前STL并没有散列容器，不过有非标准的hash_set，hash_multiset，hash_map，hash_multimap可以用，你应该知道它们。
+
+C++11已经添加了散列容器，不过被叫做unordered_xxx，这和hash_xxx有什么区别吗？老实说，除了名字不一样，一个是标准一个是非标准，它们的作用是一样的……由于hash_xxx在C++11前就有了，C++标准委员会为了区别它们，防止造成混乱，所以才取了unordered_xxx这个名字……
+
+下面是stackoverflow的解答：
+
+[Difference between hash_map and unordered_map? — stackoverflow](https://stackoverflow.com/questions/1646266/difference-between-hash-map-and-unordered-map)
+
+
+    Since there was no hash table defined in the C++ standard library, different implementors of the standard libraries would provide a non-standard hash table often named hash_map. Because these implementations were not written following a standard they all had subtle differences in functionality and performance guarantees.
+
+    Starting with C++11 a hash table implementation has been added to the C++ standard library standard. It was decided to use an alternate name for the class to prevent collisions with these non-standard implementations and to prevent inadvertent use of the new class by developers who had hash_table in their code.
+
+    The chosen alternate name is unordered_map which really is more descriptive as it hints at the class's map interface and the unordered nature of its elements.
+
+## 四.迭代器
+
+### 第26条：iterator优先于const_iterator、reserve_iterator及const_reserve_iterator
+
