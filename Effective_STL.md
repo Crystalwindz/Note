@@ -867,3 +867,119 @@ C++11已经添加了散列容器，不过被叫做unordered_xxx，这和hash_xxx
 
 ### 第26条：iterator优先于const_iterator、reserve_iterator及const_reserve_iterator
 
+STL为所有标准容器都提供了4种迭代器，他们的关系如下：
+
+![](pic/1.png)
+
+为什么要优先使用iterator？
+
+* 有些版本的insert和erase函数要求使用iterator，其他迭代器类型不满足这些函数的要求。
+* 隐式将const_iterator转换为iterator是不可能的。
+* 从reserve_iterator转换而来的iterator在使用前可能需要相应调整。
+
+### 第27条：使用distance和advance将容器的const_iterator转换为iterator
+
+如何把const_iterator转换为iterator？强制类型转换？
+
+~~~c++
+typedef vector<int>::iterator        Iter;
+typedef vector<int>::const_iterator  CIter;
+
+CIter ci;
+Iter i(const_cast<Iter>(ci));
+~~~
+
+这很可能根本无法通过编译，因为iterator和const_iterator可能是两个完全不同的类，这种转换毫无意义。
+
+应该这样做：
+
+~~~c++
+typedef vector<int>::iterator        Iter;
+typedef vector<int>::const_iterator  CIter;
+
+vector<int> v;
+CIter ci;
+...      //让ci指向v
+Iter i(v.begin());
+//distance必须写成distance<CIter>
+advance(i, distance<CIter>(i, ci));
+~~~
+
+distance函数是一个模板函数，并且参数的类型是相同的，如果你传给它两个不同类型的参数，会有二义性，编译器将无法对它实例化，需要显式指明类型参数。
+
+另外，这种方法可能对于某些容器无效，并且效率取决于迭代器的类型，总的来说，尽可能避免const_iterator向iterator的转换。
+
+### 第28条：正确理解由reverse_iterator的base()成员函数所产生的iterator的用法
+
+~~~c++
+vector<int> v;
+v.reserve(5);
+
+for(int i = 1; i <= 5; i++){
+    v.push_back(i);
+}
+
+vector<int>::reverse_iterator ri = 
+    find(v.rbegin(), v.rend(), 3);
+vector<int>::iterator i(ri.base());
+~~~
+
+以上代码执行完后，vector和迭代器的位置应该如下：
+
+![](pic/2.png)
+
+此时，如果你想在ri指向的位置插入元素，由于某些容器insert仅接受iterator，你需要将ri.base()传递给它，插入是在迭代器之前，对reverse_iterator来说，也就是之后，所以插入操作对于ri和ri.base()是等价的。
+
+不过如果你想删除元素的话，想想ri和ri.base()的位置：
+
+![](pic/3.png)
+
+这时候他们就不等价了，你需要对ri.base()做一些更改，不过，C和C++规定了从函数返回的指针不应该更改，所以这样的代码对于用指针做迭代器实现的vector和string应该不能通过编译：
+
+~~~c++
+v.erase(--ri.base());
+~~~
+你应该这样写才对：
+~~~c++
+v.erase((++ri).base());
+~~~
+
+### 第29条：对于逐个字符的输入请考虑使用istreambuf_iterator
+
+如果你想把一个文本文件复制到一个string中，像下面这么写是不对的：
+
+~~~C++
+ifstream inputfile("data.txt");
+string fileData((istream_iterator<char>(inputfile)),
+                 istream_iterator<char>() );
+~~~
+ 
+istream_iterator使用operator>>函数完成读操作，这会跳过文件中的所有空白字符。
+
+这样写会保留空白字符，但速度会很慢：
+
+~~~C++
+ifstream inputfile("data.txt");
+inputfile.unsetf(ios::skipws);
+string fileData((istream_iterator<char>(inputfile)),
+                 istream_iterator<char>() );
+~~~
+
+因为每次调用operator>>都会执行很多附加操作。
+
+所以，使用istreambuf_iterator，它不会跳过任何字符，只是简单地取回流缓冲区的下一个字符：
+
+~~~C++
+ifstream inputfile("data.txt");
+string fileData((istreambuf_iterator<char>(inputfile)),
+                 istreambuf_iterator<char>() );
+~~~
+
+这样速度会比istream_iterator快很多，不过你就无法进行格式控制了，但本来也不需要进行格式控制。
+
+同样，对于非格式化的字符输出，考虑用ostreambuf_iterator代替ostream_iterator。
+
+## 五.算法
+
+### 第30条：确保目的区间足够大
+
