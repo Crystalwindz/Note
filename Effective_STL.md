@@ -983,3 +983,77 @@ string fileData((istreambuf_iterator<char>(inputfile)),
 
 ### 第30条：确保目的区间足够大
 
+如果你使用的算法需要指定一个目的区间，请确保目的区间足够大，或者确保它会随着算法的运行而不断增大（可以通过使用插入型迭代器完成，比如ostream_iterator，或者back_inserter、front_inserter、inserter返回的迭代器）。
+
+注意，这里的足够大指的是容器的大小，而不是容量，算法是无法直接更改容器的大小和容量的，它只能对容器中的元素进行操作，比如移动拷贝复制。假设容器中有足够的容量，但它的大小并不足够容纳算法的结果，那么算法就会在容器已经分配了但还未使用的内存中“创建对象”，先不管程序能不能正确运行，即使算法真的成功创建了对象，容器的大小也不会改变（因为这不是通过正常途径添加的元素，容器无法得知究竟是谁添加的、添加了多少个元素），那么容器的end迭代器指的不可能是容器的实际end位置，于是便破坏了容器。
+
+### 第31条：了解各种与排序有关的选择
+
+根据容器的不同，功能的不同，选择如下：
+
+* 对vector、string、deque或数组中的元素完全排序，使用sort或stable_sort。
+* 对vector、string、deque或数组中等价性最前面的n个元素排序，使用partial_sort。
+* 对vector、string、deque或数组中的元素，需要找到第n个位置上的元素或者找到等价性最前面的n个元素但不需要对这n个元素排序，使用nth_element。
+* 将一个标准序列容器的元素按照某种特定条件划分开，使用partition或stable_partition。
+* 对list中的元素，可以直接使用partition和stable_partition，而sort、stable_sort、nth_element、partial_sort无法使用。可以用list::sort代替sort和stable_sort，如果想获得ntn_element或partial_sort的效果，可以将list中的元素复制到一个提供随机访问迭代器的容器里，再对这个容器进行操作或者创建一个list::iterator的容器，再对这个容器进行操作并通过其中的迭代器访问list中的元素。
+
+这些算法对迭代器的要求：
+
+* sort、stable_sort、partial_sort、nth_element算法要求随机访问迭代器。
+* partition和stable_partition算法要求双向迭代器。
+
+算法性能排名：
+1. partition
+2. stable_partition
+3. nth_element
+4. partial_sort
+5. sort
+6. stable_sort
+
+### 第32条：如果确实需要删除元素，则需要在remove这一类算法之后调用erase
+
+如何从容器中删除元素？唯一的办法就是调用容器的成员函数（这几乎总是erase的某种形式），算法是不可能直接删除容器中的元素的，而remove一类从容器中删除元素的算法并不是真正意义上的删除，它们只是把不用被删除的元素移到了区间的前面（保持它们的相对位置），返回一个指向最后一个“不用被删除”的元素之后的元素的迭代器，像下面这样：
+
+调用remove前：
+
+![](pic/4.png)
+
+调用remove：
+~~~c++
+vector<int>::iterator newEnd(remove(v.begin(), v.end(), 99));
+~~~
+
+调用remove后：
+
+![](pic/5.png)
+
+注意，并不是应该被删除的元素被移到了容器末尾，只是区间的前面一定是不用被删除的元素，调用remove后v的布局很可能像下面这样：
+
+![](pic/6.png)
+
+有关上图的解释，remove可以看做一个压缩过程，算法从前向后扫描，扫描到要被删除的元素，便用后面的元素覆盖它，直至扫描完成（如果容器里存的是指针可能就会出现问题了，见第33条），像这样：
+
+![](pic/7.png)
+
+因此，如果你真的想删除元素，请调用区间形式的erase，像这样做：
+
+~~~c++
+vector<int> v;
+...
+v.erase(remove(v.begin(), v.end(), 99), v.end());
+~~~
+
+除了remove外，remove_if，unique也与之类似，请把它们和erase联合使用来真正地删除容器中的元素。
+
+### 第33条：对包含指针的容器使用remove这一类算法时要特别小心
+
+正如第32条所说的，remove一类的算法会对容器中的元素进行覆盖，那么如果你动态分配了一些对象，并把这些对象的指针存放在一个容器里，当你想删除符合某种条件的对象时，你首先考虑到你要delete指针而不是仅仅删除指针来防止内存泄露，于是你想调用remove_if筛选出符合条件的指针，然后delete末尾的指针，可当你调用remove_if时，由于remove_if是通过覆盖工作的，末尾的指针并不一定是你要删除的元素，你不仅发生了内存泄露，还delete了不应该delete的指针:(
+
+为了避免这种情况，可以先遍历容器delete你要delete的指针，并把它们设置为nullptr，然后用erase-remove方法删除容器中的nullptr。或者，在容器中存放智能指针，这样你就可以直接使用erase-remove方法，不必再考虑内存泄漏问题。
+
+### 第34条：了解哪些算法要求使用排序的区间作为参数
+
+
+
+
+
