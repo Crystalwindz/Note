@@ -1053,6 +1053,31 @@ v.erase(remove(v.begin(), v.end(), 99), v.end());
 
 ### 第34条：了解哪些算法要求使用排序的区间作为参数
 
+先列出需要排序区间的11个算法：
+1. binary_search
+1. lower_bound
+1. upper_bound
+1. equal_range
+1. set_union
+1. set_intersection
+1. set_difference
+1. set_symmetric_difference
+1. merge
+1. inplace_merge
+1. includes
+
+这11个算法之所以要求排序的区间，就是为了提供更好的性能，具体看一下为什么：
+
+* binary_search、lower_bound、upper_bound、equal_range提供对数查找效率，用二分法查找数据，所以要求排序区间（实际上当迭代器不是随机迭代器时，由于此时元素只能一个一个移动，所以是线性时间效率）。
+* set_union、set_intersection、set_difference、set_symmtric_difference提供线性时间效率的集合操作，因此需要排序区间。
+* merge、inplace_merge提供线性时间效率，合并两个排序区间为一个新的排序区间。
+
+除了这11个之外，unique和unique_copy虽然不一定要求排序的区间，但通常和排序区间一起使用。这是因为unique**删除每一组连续相等的元素并仅保留其中的第一个**，也就是说，如果你想删除区间里所有重复的元素，你必须排序。
+
+现在说一说“排序区间”意味着什么，这意味着你如果提供给了排序函数一个自定义的比较函数，你也必须为那11个函数提供相同的比较函数，不然，它们无法知道你究竟是怎样对元素排序的，会默认升序排列。
+
+所有这11个算法均用**等价**判断两个对象是否相等，unique和unique_copy默认使用**相等**判断，但你可以传递给它们一个自定义比较函数来改变**相等**的定义来实现**等价**的概念。
+
 
 
 
