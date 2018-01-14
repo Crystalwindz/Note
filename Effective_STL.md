@@ -1078,7 +1078,219 @@ v.erase(remove(v.begin(), v.end(), 99), v.end());
 
 所有这11个算法均用**等价**判断两个对象是否相等，unique和unique_copy默认使用**相等**判断，但你可以传递给它们一个自定义比较函数来改变**相等**的定义来实现**等价**的概念。
 
+### 第35条：通过mismatch或lexicographical_compare实现简单的忽略大小写的字符串比较
 
+不考虑国际化，有两种办法实现，第一种方法使用mismatch：
 
+首先先写一个判断字符相等的函数：
 
+~~~c++
+int char_cmp(char c1, char c2){
+    int lc1 = tolower(static_cast<unsigned char>(c1));
+    int lc2 = tolower(static_cast<unsigned char>(c2));
+
+    if(lc1 < lc2)   return -1;
+    if(lc1 > lc2)   ruturn 1;
+    return 0;
+}
+~~~
+
+再通过mismatch编写比较字符串的函数：
+~~~c++
+int string_cmp_impl(const string& s1, const string& s2);//先声明
+int string_cmp(const string& s1, const string& s2){
+    //把短的字符串作为第一个参数传入，交换位置需要加负号
+    if(s1.size() <= s2.size())  return string_cmp_impl(s1, s2);
+    else    return - string_cmp_impl(s2,s1);
+}
+
+int string_cmp_impl(const string& s1, const string& s2){
+    pair<string::const_iterator,
+         string::const_iterator> p =
+        mismatch(s1.begin(), s1.end(), s2.begin(),
+                not2(ptr_fun(char_cmp)));      //char_cmp函数在字符相等时返回0
+                                               //0转换为false而不是true，加not2取反
+    if(p.first == s1.end()){                   //如果为true
+        if(p.second == s2.end())    return 0;  //要么s1和s2相等
+        else    return -1；                    //要么s1比s2短
+    }
+    
+    return char_cmp(*p.first, *p.second);      //字符串的关系和这两个
+}                                              //不匹配的字符关系相同
+~~~
+
+第二种方法使用lexicographical_compare：
+
+~~~c++
+bool char_less(char c1, char c2){       //返回在忽略大小写的前提下
+    return                              //c1是否在c2之前
+        tolower(static_cast<unsigned char>(c1)) <
+        tolower(static_cast<unsigned char>(c2));
+}
+bool string_cmp(const string& s1, const string& s2){
+    return lexicographical_compare(s1.begin(), s1.end(),
+                                   s2.begin(), s2.end(),
+                                   char_less);
+}
+~~~
+
+lexicographical_compare的功能是：接受一个判别式，由这个判别式决定两个值的顺序，比较方法和strcmp类似。
+
+### 第36条：理解copy_if算法的正确实现
+
+STL中，有11个名字中有copy的算法：
+
+1. copy
+2. copy_backward
+3. replace_copy
+4. replace_copy_if
+5. remove_copy
+6. remove_copy_if
+7. uninitialized_copy
+8. reverse_copy
+9. unique_copy
+10. rotate_copy
+11. partial_sort_copy
+
+这其中没有copy_if，意味着你如果想简单地复制某个区间里满足某个判别式的所有元素，需要自己实现。
+
+曾经copy_if是在STL里的，但因为写copy_if价值不大，后来copy_if便被丢弃了:(
+
+copy_if的一种不完美实现方法如下：
+~~~c++
+template<typename InputIterator,
+         typename OutputIterator,
+         typename Predicate>
+OutputIterator copy_if(InputIterator begin,
+                       InputIterator end,
+                       OutputIterator destBegin
+                       Predicate p)
+{
+    return remove_copy_if(begin, end, destBegin, not1(p));
+}
+~~~
+
+为了得到所有满足p的元素，只要去掉所有不满足p的元素就好了，用not1将判别式取反调用remove_copy_if即可。不过，这种实现方法是有缺陷的，如果你写一个函数，将它作为p传递给上面的函数，编译不会通过，因为not1不能应用于函数指针上，你需要ptr_fun函数来进行转换。为了调用上面的函数，你要传递的不仅是一个函数对象，还应该是一个可配接的函数对象（这很容易做到）。下面是一个完美的实现：
+
+~~~c++
+template<typename InputIterator,
+         typename OutputIterator,
+         typename Predicate>
+OutputIterator copy_if(InputIterator begin,
+                       InputIterator end,
+                       OutputIterator destBegin
+                       Predicate p)
+{
+    while(begin != end){
+        if(p(*begin))   *destBegin++ = *begin;
+        ++begin;
+    }
+
+    return destBegin;
+}
+~~~
+
+### 第37条：使用accumulate或者for_each进行区间统计
+
+有时候，你需要对某个区间做一些操作，比如count告诉你区间里有多少个元素、count_if告诉你满足判别式的元素个数、min_element和max_element获得区间里的最小最大值。如果你想按照自定义的方式对区间统计处理，accumulate是你所需要的（注意，accumulate在头文件\<numeric\>而不是\<algorithm\>中）。
+
+accumulate可以这样用：
+~~~c++
+list<double> l;
+...                                              //添加一些double
+double sum = accumulate(l.begin(), l.end(), 0.0) //计算和，初始值为0.0
+~~~
+
+注意，初始值必须是0.0，因为0.0的类型是double，这样accumulate内部会用一个double类型的变量保存计算的总和；而如果初始值是0，accumulate内部就会用一个int类型的变量保存计算的总和，结果肯定是不对的。
+
+也许正是accumulate默认的这种用法使它归为numeric algorithm（数值算法），不过accumulate还可以再带一个任意的统计函数使用：
+
+~~~c++
+//一个统计字符串长度的函数
+string::size_type 
+string_len_sum(string::size_type sum_now,       //第一个参数为当前总和，
+               const string& s){                //第二个是下一个要统计的元素
+                   return sum_now + s.size();
+}
+...
+set<string> s;
+...                                             //加入一些数据
+string::size_type lengthsum =                   //对s中的每个元素调用
+    accumulate(s.begin(), s.end(),              //string_len_sum，结果
+            static_cast<string::size_type>(0),  //赋给lengthsum，初始值为0
+            string_len_sum);
+~~~
+
+来点有趣的，统计一个区间所有点的平均值，点结构如下：
+~~~c++
+struct Point{
+    Point(double initx, double inity):x(initx), y(inity) {}
+    double x, y;
+}
+~~~
+
+统计函数怎么写？大概像下面这样：
+
+~~~c++
+struct Point{...};
+class Point_average:
+    public binary_function<Point, Point, Point>{//见第40条
+pubilc:
+    Point_average():xsum(0), ysum(0), num_point(0) {}
+
+    const Point operator() (const Point& avg_now, const Point& p)
+    {
+        ++num_point;
+        xsum += p.x;
+        ysum += p.y;
+        return Point(xsum/num_point, ysum/num_point);
+    }
+private:
+    size_t num_point;
+    double xsum;
+    double ysum;
+}
+...
+list<Point> l;
+...
+Point avg = accumulate(l.begin(), l.end(),
+                       Point(0, 0), Point_average());
+~~~
+
+上面的代码看起来很棒，但是，标准规定传给accumulate的函数不能有副作用，而上面的函数对象修改了xsum、ysum、num_point，是有副作用的，所以行为未定义。
+
+于是，我们可以转向for_each，传递给for_each的函数可以有副作用。因为for_each是将函数应用于区间的每一个元素，每次应用完后返回一个函数的拷贝，也就是最后会返回一个函数对象，所以我们需要能从这个函数对象中提取出我们所需要的信息。不过这样做，代码就没那么清晰了：
+
+~~~c++
+struct Point{...};
+class Point_average:
+    public unary_function<Point, void>{//见第40条
+pubilc:
+    Point_average():xsum(0), ysum(0), num_point(0) {}
+
+    void operator() (const Point& p)
+    {
+        ++num_point;
+        xsum += p.x;
+        ysum += p.y;
+    }
+    Point result() const
+    {
+        return Point(xsum/num_point, ysum/num_point);
+    }
+private:
+    size_t num_point;
+    double xsum;
+    double ysum;
+}
+...
+list<Point> l;
+...
+Point avg = for_each(l.begin(), l.end(),
+                        Point_average()).result();
+~~~
+
+## 六.函数子、函数子类、函数及其他
+
+### 第38条：遵循按值传递的原则来设计函数子类
 
