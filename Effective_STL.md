@@ -1294,3 +1294,101 @@ Point avg = for_each(l.begin(), l.end(),
 
 ### 第38条：遵循按值传递的原则来设计函数子类
 
+C和C++标准库函数，函数指针都是按值传递的，而在STL中，函数对象也是按值传递的（虽然你可以通过显式指明模板参数类型使它按照引用传递，但这样做并不好），所以你应该确保你编写的函数对象在经过了传递之后还能正常工作，这意味着：
+
+1. 你的函数对象应尽可能地小，否则复制开销太大。
+2. 函数对象必须是单态的，如果它使用了虚函数，参数类型为基类，而实参是派生类，传递时就会发生剥离问题。
+
+但是，函数对象可以包含很多状态信息，并且如果使用多态可以很有用，为了解决这个矛盾，可以把数据和虚函数从函数子类分离出去放到一个新类中，并在函数子类中放一个指向新类对象的指针，这个技术很有用也很常用。
+
+### 第39条：确保判别式是“纯函数”
+
+判别式：一个返回bool类型的函数。
+
+纯函数：返回值仅仅依赖于其参数的函数。
+
+判别式类：operator()函数是一个判别式的函数子类。
+
+记得第38条说的吗，函数对象都是按照值传递的，如果你的判别式不是“纯函数”，在其中有一些状态变量，那么它每次传递时都会复制一份，这很可能与你预想的结果不同。
+
+### 第40条：若一个类是函数子，则应使它可配接
+
+假设你想找到一个容器中满足特定条件的元素，你很可能像下面这么写：
+
+~~~c++
+vector<Person> v;
+bool isboy(const Person& p);
+auto first_boy = find_if(v.begin(), v.end(), isboy);//ok
+auto first_girl = find_if(v.begin(), v.end(), not1(isboy));//错误，无法编译！
+~~~
+你必须在应用not1之前先应用ptr_fun：
+~~~c++
+auto first_girl = find_if(v.begin(), v.end(), not1(ptr_fun(isboy)));//ok
+~~~
+
+ptr_fun做了什么？它只是完成了一些类型定义的工作，但这些类型定义是not1所必需的。在STL中，4个标准函数配接器（not1、not2、bind1st、bind2nd）都有一些特殊的类型定义，非标准的与STL兼容的配接器也是如此，而提供了这些类型定义的函数对象被称为可配接的函数对象。如果你想让你的函数对象可以和STL协同工作，请让它们成为可配接的。
+
+如何做呢？先来看看这些特殊的类型定义：argument_type、first_argument_type、second_argument_type、result_type等，这些只是其中的一些，除非你要编写自定义的配接器，你不需要过多了解它们，你只需要简单地继承一些基类并提供相应的模板参数即可：
+
+* 如果判别式只有一个参数，从std::unary_function继承，提供参数类型和返回类型。
+* 如果判别式有两个参数，从std::binary_function继承，提供第一个参数类型、第二个参数类型和返回类型。
+
+有关提供的参数，还有一点点要说（不要追究为什么是这样）：
+* 如果参数类型是非指针类型，请提供去掉const和&的参数。
+* 如果参数类型是指针类型，请保留const和&，提供完全一样的参数。
+
+另外，如果你想让你的函数子类具有多种不同的调用形式，那你就放弃了让其可配接的能力，不过有时候这的确有用。
+
+### 第41条：理解ptr_fun、mem_fun和mem_fun_ref的来由
+
+ptr_fun、mem_fun和mem_fun_ref的主要作用是为了解决C++语言中语法不一致的问题，比如说你有一个函数f和一个对象x，你想在x上调用f，那么你有三种写法：
+~~~c++
+f(x);   //#1. f是一个非成员函数
+x.f();  //#2. f是x所在类的成员函数
+p->f(); //#3. f是成员函数，并且p是指向x的指针
+~~~
+现在有一个测试函数：
+~~~c++
+void test(Widget& w);
+~~~
+一个存放Widget的容器：
+~~~c++
+vector<Widget> v;
+~~~
+你想对v中每一个对象都进行测试：
+~~~c++
+for_each(v.begin(), v.end(), test); //#1，可通过编译
+~~~
+如果test是Widget的成员函数：
+~~~c++
+for_each(v.begin(), v.end(), &Widget::test); //#2，无法通过编译
+~~~
+如果对于存放Widget*的容器，理想状态下我们应该也能通过for_each调用：
+~~~c++
+list<Widget*> l;
+for_each(l.begin(), l.end(), &Widget::test); //#3，无法通过编译
+~~~
+
+理想很美好，现实很残酷，for_each对于以上的三种调用方式需要三个版本，可实际上for_each只有一个版本，不难猜测它的实现：
+~~~c++
+template<typename InputIterator, typename Function>
+Function for_each(InputIterator begin, InputIterator end, Function f)
+{
+    while (begin != end)    f(*begin++);
+    return  f;
+}
+~~~
+是的，STL的惯例就是用#1的调用方式，而mem_fun和mem_fun_ref的作用就是为了调整成员函数使之能通过#1方式调用。像mem_fun和mem_fun_ref这样的类被称为函数对象配接器。
+
+另外，ptr_fun、mem_fun和mem_fun_ref所产生的对象还提供了一些类型定义（见第40条）。
+
+关于mem_fun和 mem_fun_ref的名字来由，这是一个历史遗留问题，接受它就好。
+
+### 第42条：确保less\<T\>与operator\<具有相同的含义
+
+对std名称空间中组件的修改是被禁止的，但是用户可以针对自己定义的类型特化std中的模板，如果你特化less模板，请务必确保你的特化版本和operator\<有相同的语义，因为C++假设less就是等价于operator\<的。
+
+## 七.在程序中使用STL
+
+### 第43条：算法调用优先于手写的循环
+
