@@ -1,6 +1,6 @@
 # 个人博客
 
-[Crystalwindz's Blog](crystalwindz.github.io)
+[Crystalwindz's Blog](https://crystalwindz.github.io)
 
 # Note(不再更新)
 
