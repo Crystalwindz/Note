@@ -1,4 +1,8 @@
-# Note
+# 个人博客
+
+[Crystalwindz's Blog](crystalwindz.github.io)
+
+# Note(不再更新)
 
 记录自己平时学习想记下的一些东西。
 
